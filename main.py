@@ -28,6 +28,10 @@ async def index():
 @app.get("/tick-ohlc")
 async def get_tick_ohlc():
     return get_ohlc_bars()
-
+    
+@app.get("/test")
+async def test():
+    return {"ok": True}
+    
 if __name__ == "__main__":
     uvicorn.run("main:app", port=8000, reload=True)
