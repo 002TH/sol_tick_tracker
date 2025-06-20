@@ -1,69 +1,58 @@
 import asyncio
-import websockets
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
+import httpx
 
 ohlc_bars = []
-tick_data = {
-    "last_price": None,
-    "cumulative_tick": 0,
-    "current_bar": {
-        "open": 0,
-        "high": 0,
-        "low": 0,
-        "close": 0,
-        "start_time": None
-    }
-}
+
+# Helper to convert to 15-min intervals
+def get_15min_key():
+    now = datetime.utcnow()
+    minute_block = (now.minute // 15) * 15
+    return now.replace(minute=minute_block, second=0, microsecond=0)
+
+# Main polling + TICK calculation logic
+async def start_tick_tracking():
+    print("Polling Binance API every 2 seconds...")
+
+    last_price = None
+    current_tick_bar = {"open": 0, "high": 0, "low": 0, "close": 0}
+    current_bar_key = get_15min_key()
+
+    while True:
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get("https://api.binance.com/api/v3/trades?symbol=SOLUSDT&limit=50")
+                trades = r.json()
+
+            for trade in trades:
+                price = float(trade["price"])
+                new_key = get_15min_key()
+
+                if new_key != current_bar_key:
+                    # New 15-min bar
+                    current_tick_bar["close"] = current_tick_bar["open"] + current_tick_bar["high"] + current_tick_bar["low"]
+                    ohlc_bars.append({
+                        "time": current_bar_key.strftime("%H:%M"),
+                        **current_tick_bar
+                    })
+                    if len(ohlc_bars) > 20:
+                        ohlc_bars.pop(0)
+                    current_tick_bar = {"open": 0, "high": 0, "low": 0, "close": 0}
+                    current_bar_key = new_key
+                    last_price = None
+
+                if last_price is not None:
+                    tick = 1 if price > last_price else -1 if price < last_price else 0
+                    current_tick_bar["high"] = max(current_tick_bar["high"], tick)
+                    current_tick_bar["low"] = min(current_tick_bar["low"], tick)
+                    current_tick_bar["open"] += tick  # Cumulative tick
+
+                last_price = price
+
+        except Exception as e:
+            print("Polling error:", e)
+
+        await asyncio.sleep(2)
 
 def get_ohlc_bars():
-    return ohlc_bars[-10:]  # return last 10 bars
-
-def reset_bar():
-    bar = tick_data["current_bar"]
-    ohlc_bars.append({
-        "time": bar["start_time"].strftime("%H:%M"),
-        "open": bar["open"],
-        "high": bar["high"],
-        "low": bar["low"],
-        "close": bar["close"]
-    })
-    tick_data["current_bar"] = {
-        "open": tick_data["cumulative_tick"],
-        "high": tick_data["cumulative_tick"],
-        "low": tick_data["cumulative_tick"],
-        "close": tick_data["cumulative_tick"],
-        "start_time": datetime.utcnow()
-    }
-
-async def start_tick_tracking():
-    uri = "wss://stream.binance.com:9443/ws/solusdt@trade"
-    async with websockets.connect(uri) as websocket:
-        tick_data["current_bar"]["start_time"] = datetime.utcnow()
-        tick_data["current_bar"]["open"] = tick_data["cumulative_tick"]
-
-        while True:
-            msg = await websocket.recv()
-            data = json.loads(msg)
-            price = float(data["p"])
-
-            last = tick_data["last_price"]
-            if last is not None:
-                if price > last:
-                    tick_data["cumulative_tick"] += 1
-                elif price < last:
-                    tick_data["cumulative_tick"] -= 1
-
-            tick_data["last_price"] = price
-            current = tick_data["cumulative_tick"]
-            bar = tick_data["current_bar"]
-
-            bar["high"] = max(bar["high"], current)
-            bar["low"] = min(bar["low"], current)
-            bar["close"] = current
-
-            # New 15-min bar?
-            if datetime.utcnow() - bar["start_time"] >= timedelta(minutes=15):
-                reset_bar()
-
-            await asyncio.sleep(0.5)
+    return ohlc_bars
