@@ -17,11 +17,8 @@ tick_data = {
 }
 
 def get_ohlc_bars():
-    return [
-        {"time": "12:00", "open": 1, "high": 3, "low": 0, "close": 2},
-        {"time": "12:15", "open": 2, "high": 4, "low": 1, "close": 3},
-        {"time": "12:30", "open": 3, "high": 5, "low": 2, "close": 1}
-    ]
+    return ohlc_bars[-10:]  # return last 10 bars
+
 def reset_bar():
     bar = tick_data["current_bar"]
     ohlc_bars.append({
